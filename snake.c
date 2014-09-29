@@ -156,6 +156,8 @@ void hash_free(struct hash* hash) {
   hashnode_free(hash->keys);
 }
 
+struct missile;
+
 /* Game - Declarations */
 #define DEFAULT_DELAY 80
 #define WARPED_DELAY 30
@@ -169,9 +171,23 @@ typedef struct game {
   bool timeWarp;
   SDL_TimerID warpTimerId;
   int frameDelay;
+  // Missiles - Only one currently supported
+  struct missile* missile;
+  struct hash* missile_exists;
 } Game;
-const Game GAME_DEFAULT = {true, false, 50, 50, NULL, NULL, false, NULL, DEFAULT_DELAY};
+const Game GAME_DEFAULT = {true, false, 50, 50, NULL, NULL, false, NULL, DEFAULT_DELAY, NULL, 0};
 Game game;
+
+struct point {
+  int x;
+  int y;
+};
+typedef struct missile {
+  struct point location;
+  bool active;
+  struct game* game;
+  bool dead;
+} Missile;
 
 bool game_has_berry_at(struct game*, int, int);
 void game_remove_berry(struct game*, int, int);
@@ -180,13 +196,9 @@ void game_handle_keyevent(struct game*, SDL_KeyboardEvent);
 void game_next_state(struct game*);
 void game_set_timewarp(struct game*);
 Uint32 game_disable_timewarp_callback(Uint32, void*);
+void game_update_missile_stuff(struct game*);
 
 /* Snake structures */
-struct point {
-  int x;
-  int y;
-};
-
 struct direction {
   int dx;
   int dy;
@@ -332,6 +344,15 @@ bool snake_check_dead(Snake* snake) {
     return true;
   }
 
+  // Does snake collide with a missile?
+  struct node* node = snake->back;
+  while (node != NULL) {
+    if (game.missile->location.x == node->point.x && game.missile->location.y == node->point.y) {
+      return true;
+    }
+    node = node->next;
+  }
+
   return false;
 }
 
@@ -343,6 +364,31 @@ void snake_free(Snake* snake) {
     node_free(to_remove);
   }
   free(snake);
+}
+
+/* Missile */
+Missile* missile_init(struct game* game) {
+  Missile* missile = malloc(sizeof(struct missile));
+  missile->location.x = rand() % game->width;
+  missile->location.y = game->height - 1;
+  missile->active = true; //false;
+  missile->game = game;
+  missile->dead = false;
+
+  return missile;
+}
+
+void missile_go(Missile* missile) {
+  if (missile->location.y > 0) {
+    missile->location.y -= 1;
+  } else {
+    // Dead means the memory can be freed
+    missile->dead = true;
+  }
+}
+
+void missile_free(Missile* missile) {
+  free(missile);
 }
 
 /* Game structure */
@@ -409,9 +455,21 @@ void game_set_time_warp(Game* game) {
   game->warpTimerId = SDL_AddTimer(600, game_disable_timewarp_callback, game);
 }
 
+void game_update_missile_stuff(Game* game) {
+  // Randomly add new missiles
+  // Update all missile locations (and missile_exists hash)
+  // TODO support >1 missile
+  missile_go(game->missile);
+  if (game->missile->dead) {
+    missile_free(game->missile);
+    game->missile = missile_init(game);
+  }
+}
+
 void game_next_state(Game* game) {
   if (game->running && !game->gameOver) {
     snake_go(game->snake);
+    game_update_missile_stuff(game);
     if (snake_check_dead(game->snake)) {
       game->gameOver = true;
       return;
@@ -491,6 +549,8 @@ int main () {
   game = GAME_DEFAULT;
   game.snake = mySnake;
   game.berries = hash_init();
+  game.missile = missile_init(&game);
+  game.missile_exists = hash_init();
 
   game_add_random_berry(&game);
 
@@ -541,6 +601,14 @@ int main () {
       SDL_FillRect(screen, &dest, 0xff0000ff);
       berries = berries->next;
     }
+
+    // Paint missile(s)
+    SDL_Rect missileDest;
+    missileDest.w = 10;
+    missileDest.h = 10;
+    missileDest.x = game.missile->location.x * 10;
+    missileDest.y = game.missile->location.y * 10;
+    SDL_FillRect(screen, &missileDest, 0xffffffff);
     //printf("Done.\n");
 
     SDL_UpdateRect(screen, 0,0,0,0);
@@ -550,7 +618,9 @@ int main () {
   SDL_FreeSurface(screen);
   SDL_FreeSurface(square);
   snake_free(mySnake);
+  missile_free(game.missile);
   hash_free(game.berries);
+  hash_free(game.missile_exists);
   SDL_Quit();
 
   return 0;
