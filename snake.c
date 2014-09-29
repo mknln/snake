@@ -154,7 +154,7 @@ void hash_free(struct hash* hash) {
   for (i = 0; i < hash->hash_size; i++) {
     hashnode_free(hash->hash_array[i]);
   }
-  free(hash->keys);
+  hashnode_free(hash->keys);
 }
 
 struct snake;
