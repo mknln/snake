@@ -270,6 +270,7 @@ typedef struct snake {
   Node *back, *front;
   struct direction direction;
   int num_points;
+  bool has_moved;
 } Snake;
 
 Snake* snake_init() {
@@ -289,6 +290,7 @@ Snake* snake_init() {
   mySnake->back = node_create(8, 0, n5);
 
   mySnake->num_points = 7;
+  mySnake->has_moved = true;
 
   return mySnake;
 }
@@ -305,6 +307,11 @@ void snake_print_points(Snake* snake) {
 
 bool snake_change_direction(Snake* snake, int dx, int dy) {
   // Make sure snake doesn't turn back on itself
+  if (!snake->has_moved) {
+     return;
+  }
+  if (snake->direction.dx == dx || snake->direction.dy == dy)
+    return false;
   if (snake->direction.dx == 1 && dx == -1)
     return false;
   if (snake->direction.dx == -1 && dx == 1)
@@ -316,6 +323,7 @@ bool snake_change_direction(Snake* snake, int dx, int dy) {
 
   snake->direction.dx = dx;
   snake->direction.dy = dy;
+  snake->has_moved = false;
   printf("Snake will change direction: %d, %d\n", dx, dy);
   return true;
 }
@@ -362,6 +370,7 @@ void snake_go(Snake* snake) {
   int y = snake->front->point.y + snake->direction.dy;
   snake->front->next = node_create(x, y, NULL);
   snake->front = snake->front->next;
+  snake->has_moved = true;
 }
 
 void snake_grow(Snake* snake) {
