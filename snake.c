@@ -159,8 +159,9 @@ void hash_free(struct hash* hash) {
 struct missile;
 
 /* Game - Declarations */
-#define DEFAULT_DELAY 80
-#define WARPED_DELAY 30
+#define SNAKE_DEFAULT_DELAY 80
+#define SNAKE_WARPED_DELAY 30
+#define MISSILE_DELAY 80
 typedef struct game {
   bool running;
   bool gameOver;
@@ -175,7 +176,7 @@ typedef struct game {
   struct missile* missile;
   struct hash* missile_exists;
 } Game;
-const Game GAME_DEFAULT = {true, false, 50, 50, NULL, NULL, false, NULL, DEFAULT_DELAY, NULL, 0};
+const Game GAME_DEFAULT = {true, false, 50, 50, NULL, NULL, false, NULL, SNAKE_DEFAULT_DELAY, NULL, 0};
 Game game;
 
 struct point {
@@ -466,10 +467,37 @@ void game_update_missile_stuff(Game* game) {
   }
 }
 
+bool game_snake_time_ready(Game* game) {
+    Uint32 time_now = SDL_GetTicks();
+    static Uint32 last_snake_time = 0;
+    bool res = (time_now - last_snake_time >= game->frameDelay || (game->timeWarp && (time_now - last_snake_time >= SNAKE_WARPED_DELAY)));
+    if (res) {
+      last_snake_time = time_now;
+    }
+    return res;
+}
+
+bool game_missile_time_ready(Game* game) {
+    Uint32 time_now = SDL_GetTicks();
+    static Uint32 last_missile_time = 0;
+    bool res = time_now - last_missile_time >= MISSILE_DELAY;
+    if (res) {
+      last_missile_time = time_now;
+    }
+    return res;
+}
+
 void game_next_state(Game* game) {
   if (game->running && !game->gameOver) {
-    snake_go(game->snake);
-    game_update_missile_stuff(game);
+
+    if (game_snake_time_ready(game)) {
+      snake_go(game->snake);
+    }
+
+    if (game_missile_time_ready(game)) {
+      game_update_missile_stuff(game);
+    }
+
     if (snake_check_dead(game->snake)) {
       game->gameOver = true;
       return;
@@ -480,7 +508,7 @@ void game_next_state(Game* game) {
       // Set time warp for next 1 second
       game_set_time_warp(game);
       // Decrease delay by 1ms for every 4 berries eaten
-      game->frameDelay = DEFAULT_DELAY - (game->snake->berriesEaten / 4);
+      game->frameDelay = SNAKE_DEFAULT_DELAY - (game->snake->berriesEaten / 4);
     }
   } else {
     printf("Game Over\n");
@@ -503,7 +531,7 @@ Uint32 timer_event(Uint32 interval, void *param) {
   event.user = userevent;
 
   SDL_PushEvent(&event);
-  return game.timeWarp ? WARPED_DELAY : game.frameDelay;
+  return 10;
 }
 
 int main () {
@@ -554,7 +582,7 @@ int main () {
 
   game_add_random_berry(&game);
 
-  SDL_TimerID timerId = SDL_AddTimer(DEFAULT_DELAY, timer_event, &game);
+  SDL_TimerID timerId = SDL_AddTimer(SNAKE_DEFAULT_DELAY, timer_event, &game);
 
   // Wait for the user to close the window
   bool run = true;
@@ -588,6 +616,7 @@ int main () {
       SDL_BlitSurface(square, NULL, screen, &dest);
       node = node->next;
     }
+
     // Paint berries
     dest.w = 10;
     dest.h = 10;
