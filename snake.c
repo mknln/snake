@@ -306,19 +306,13 @@ void snake_print_points(Snake* snake) {
 }
 
 bool snake_change_direction(Snake* snake, int dx, int dy) {
-  // Make sure snake doesn't turn back on itself
+  // Prevent multiple keypresses before snake has actually moved
   if (!snake->has_moved) {
      return;
   }
+
+  // No direction change. This check also prevents snake from turning back on itself.
   if (snake->direction.dx == dx || snake->direction.dy == dy)
-    return false;
-  if (snake->direction.dx == 1 && dx == -1)
-    return false;
-  if (snake->direction.dx == -1 && dx == 1)
-    return false;
-  if (snake->direction.dy == -1 && dy == 1)
-    return false;
-  if (snake->direction.dy == 1 && dy == -1)
     return false;
 
   snake->direction.dx = dx;
