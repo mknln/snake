@@ -123,7 +123,6 @@ void hash_add(struct hash* hash, char* key) {
 }
 
 bool hash_delete(struct hash* hash, const char* key) {
-  printf("hash_delete called");
   int hash_index = _hash_func(key) % hash->hash_size;
   // Remove key from list
   struct hashnode* prev = NULL;
@@ -157,15 +156,9 @@ void hash_free(struct hash* hash) {
   hashnode_free(hash->keys);
 }
 
-struct snake;
-bool snake_change_direction(struct snake*, int, int);
-void snake_go(struct snake*);
-bool snake_check_dead(struct snake*);
-bool snake_try_eat_berry(struct snake*);
-bool snake_has_point_at(struct snake*, int, int);
-void snake_grow(struct snake*);
-
-/* Game structure */
+/* Game - Declarations */
+#define DEFAULT_DELAY 80
+#define WARPED_DELAY 30
 typedef struct game {
   bool running;
   bool gameOver;
@@ -173,70 +166,22 @@ typedef struct game {
   int height;
   struct snake* snake;
   struct hash* berries;
+  bool timeWarp;
+  SDL_TimerID warpTimerId;
+  int frameDelay;
 } Game;
-const Game GAME_DEFAULT = {true, false, 50, 50, NULL};
+const Game GAME_DEFAULT = {true, false, 50, 50, NULL, NULL, false, NULL, DEFAULT_DELAY};
 Game game;
 
-/* Game methods */
-void game_handle_keyevent(Game* game, SDL_KeyboardEvent keyevent) {
-  switch (keyevent.keysym.sym) {
-    case SDLK_DOWN:
-      snake_change_direction(game->snake, 0, 1);
-      break;
-    case SDLK_UP:
-      snake_change_direction(game->snake, 0, -1);
-      break;
-    case SDLK_LEFT:
-      snake_change_direction(game->snake, -1, 0);
-      break;
-    case SDLK_RIGHT:
-      snake_change_direction(game->snake, 1, 0);
-      break;
-  }
-}
+bool game_has_berry_at(struct game*, int, int);
+void game_remove_berry(struct game*, int, int);
+void game_add_random_berry(struct game*);
+void game_handle_keyevent(struct game*, SDL_KeyboardEvent);
+void game_next_state(struct game*);
+void game_set_timewarp(struct game*);
+Uint32 game_disable_timewarp_callback(Uint32, void*);
 
-bool game_has_berry_at(Game* game, int x, int y) {
-  char str[7];
-  sprintf(str, "%d,%d", x, y);
-  return hash_exists(game->berries, str);
-}
-
-void game_add_random_berry(Game* game) {
-  int y = rand() % game->height;
-  int x = rand() % game->width;
-  if (snake_has_point_at(game->snake, x, y)) {
-    // Don't add berry on top of snake
-    game_add_random_berry(game);
-  } else {
-    char* str = malloc(8); // 999,999\0
-    sprintf(str, "%d,%d", x, y);
-    hash_add(game->berries, str);
-    printf("Added berry at %d, %d\n", x, y);
-  }
-}
-
-void game_remove_berry(Game* game, int x, int y) {
-  char str[7];
-  sprintf(str, "%d,%d", x, y);
-  hash_delete(game->berries, str);
-}
-
-void game_next_state(Game* game) {
-  if (game->running && !game->gameOver) {
-    snake_go(game->snake);
-    if (snake_check_dead(game->snake)) {
-      game->gameOver = true;
-      return;
-    }
-    if (snake_try_eat_berry(game->snake)) {
-      printf("Ate berry\n");
-      game_add_random_berry(game);
-    }
-  } else {
-    printf("Game Over\n");
-  }
-}
-
+/* Snake structures */
 struct point {
   int x;
   int y;
@@ -271,6 +216,7 @@ typedef struct snake {
   struct direction direction;
   int num_points;
   bool has_moved;
+  unsigned berriesEaten;
 } Snake;
 
 Snake* snake_init() {
@@ -322,12 +268,21 @@ bool snake_change_direction(Snake* snake, int dx, int dy) {
   return true;
 }
 
+void snake_grow(Snake* snake) {
+  // Figure out direction of tail based on last two points
+  int dx = snake->back->point.x - snake->back->next->point.x;
+  int dy = snake->back->point.y - snake->back->next->point.y;
+  Node* old_tail = snake->back;
+  snake->back = node_create(old_tail->point.x + dx, old_tail->point.y + dy, old_tail);
+}
+
 bool snake_try_eat_berry(Snake* snake) {
   int y = snake->front->point.y;
   int x = snake->front->point.x;
   if (game_has_berry_at(&game, x, y)) {
     game_remove_berry(&game, x, y);
     snake_grow(snake);
+    snake->berriesEaten++;
     return true;
   }
 
@@ -367,14 +322,6 @@ void snake_go(Snake* snake) {
   snake->has_moved = true;
 }
 
-void snake_grow(Snake* snake) {
-  // Figure out direction of tail based on last two points
-  int dx = snake->back->point.x - snake->back->next->point.x;
-  int dy = snake->back->point.y - snake->back->next->point.y;
-  Node* old_tail = snake->back;
-  snake->back = node_create(old_tail->point.x + dx, old_tail->point.y + dy, old_tail);
-}
-
 bool snake_check_dead(Snake* snake) {
   // Does snake go out of bounds?
   if (snake->front->point.x < 0 || snake->front->point.x >= game.width || snake->front->point.y < 0 || snake->front->point.y >= game.height) {
@@ -398,6 +345,90 @@ void snake_free(Snake* snake) {
   free(snake);
 }
 
+/* Game structure */
+/* Game methods */
+void game_handle_keyevent(Game* game, SDL_KeyboardEvent keyevent) {
+  switch (keyevent.keysym.sym) {
+    case SDLK_DOWN:
+      snake_change_direction(game->snake, 0, 1);
+      break;
+    case SDLK_UP:
+      snake_change_direction(game->snake, 0, -1);
+      break;
+    case SDLK_LEFT:
+      snake_change_direction(game->snake, -1, 0);
+      break;
+    case SDLK_RIGHT:
+      snake_change_direction(game->snake, 1, 0);
+      break;
+  }
+}
+
+bool game_has_berry_at(Game* game, int x, int y) {
+  char str[7];
+  sprintf(str, "%d,%d", x, y);
+  return hash_exists(game->berries, str);
+}
+
+void game_add_random_berry(Game* game) {
+  int y = rand() % game->height;
+  int x = rand() % game->width;
+  if (snake_has_point_at(game->snake, x, y)) {
+    // Don't add berry on top of snake
+    game_add_random_berry(game);
+  } else {
+    char* str = malloc(8); // 999,999\0
+    sprintf(str, "%d,%d", x, y);
+    hash_add(game->berries, str);
+    printf("Added berry at %d, %d\n", x, y);
+  }
+}
+
+void game_remove_berry(Game* game, int x, int y) {
+  char str[7];
+  sprintf(str, "%d,%d", x, y);
+  hash_delete(game->berries, str);
+}
+
+Uint32 game_disable_timewarp_callback(Uint32 interval, void *param) {
+
+  printf("Timer fired\n");
+  struct game* game = (struct game*) param;
+  game->timeWarp = false;
+  game->warpTimerId = NULL;
+  return 0; // One-shot timer
+}
+
+void game_set_time_warp(Game* game) {
+  game->timeWarp = true;
+  // Temporary speed-up
+  if (game->warpTimerId != NULL) {
+    SDL_RemoveTimer(game->warpTimerId);
+    game->warpTimerId = NULL;
+  }
+  game->warpTimerId = SDL_AddTimer(600, game_disable_timewarp_callback, game);
+}
+
+void game_next_state(Game* game) {
+  if (game->running && !game->gameOver) {
+    snake_go(game->snake);
+    if (snake_check_dead(game->snake)) {
+      game->gameOver = true;
+      return;
+    }
+    if (snake_try_eat_berry(game->snake)) {
+      printf("Ate berry\n");
+      game_add_random_berry(game);
+      // Set time warp for next 1 second
+      game_set_time_warp(game);
+      // Decrease delay by 1ms for every 4 berries eaten
+      game->frameDelay = DEFAULT_DELAY - (game->snake->berriesEaten / 4);
+    }
+  } else {
+    printf("Game Over\n");
+  }
+}
+
 Uint32 timer_event(Uint32 interval, void *param) {
   /* This timer just pushes an event to the event queue, so
    * that we can do our processing in the main event loop.
@@ -414,7 +445,7 @@ Uint32 timer_event(Uint32 interval, void *param) {
   event.user = userevent;
 
   SDL_PushEvent(&event);
-  return interval;
+  return game.timeWarp ? WARPED_DELAY : game.frameDelay;
 }
 
 int main () {
@@ -463,7 +494,7 @@ int main () {
 
   game_add_random_berry(&game);
 
-  SDL_TimerID timerId = SDL_AddTimer(100, timer_event, mySnake);
+  SDL_TimerID timerId = SDL_AddTimer(DEFAULT_DELAY, timer_event, &game);
 
   // Wait for the user to close the window
   bool run = true;
