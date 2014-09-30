@@ -173,7 +173,7 @@ typedef struct game {
   SDL_TimerID warpTimerId;
   int frameDelay;
   // Missiles - Only one currently supported
-  struct missile* missile;
+  struct missile_list* missiles;
   struct hash* missile_exists;
 } Game;
 const Game GAME_DEFAULT = {true, false, 50, 50, NULL, NULL, false, NULL, SNAKE_DEFAULT_DELAY, NULL, 0};
@@ -189,6 +189,7 @@ typedef struct missile {
   struct game* game;
   bool dead;
 } Missile;
+void missile_free(struct missile*);
 
 bool game_has_berry_at(struct game*, int, int);
 void game_remove_berry(struct game*, int, int);
@@ -224,6 +225,92 @@ void node_free(Node* node) {
   free(node);
 }
 
+/* Missile list */
+typedef struct missile_item {
+  struct missile_item* prev;
+  Missile* item;
+  struct missile_item* next;
+} MissileItem;
+
+typedef struct missile_list {
+  MissileItem* head;
+} MissileList;
+
+MissileList* missile_list_init() {
+  MissileList* list = malloc(sizeof(struct missile_list));
+  list->head = NULL;
+  return list;
+}
+
+void missile_list_add(MissileList* list, Missile* missile) {
+  // Add to front of list
+  MissileItem* item = malloc(sizeof(struct missile_item));
+  if (list->head != NULL) {
+    list->head->prev = item;
+  }
+  item->prev = NULL;
+  item->item = missile;
+  item->next = list->head;
+  list->head = item;
+}
+
+void missile_list_remove(MissileList* list, MissileItem* itemToRemove) {
+  if (itemToRemove->prev == NULL) {
+    // This is the head of the list, so reassign the head to next item
+    list->head = itemToRemove->next;
+    if (list->head != NULL) {
+      list->head->prev = NULL;
+    }
+  } else {
+    MissileItem* prev = itemToRemove->prev;
+    MissileItem* next = itemToRemove->next;
+    if (prev != NULL) {
+      prev->next = next;
+    }
+    if (next != NULL) {
+      next->prev = prev;
+    }
+  }
+  missile_free(itemToRemove->item);
+  free(itemToRemove);
+}
+
+void missile_list_free(MissileList* list) {
+  MissileItem* node = list->head;
+  while (node != NULL) {
+    MissileItem* next = node->next;
+    missile_free(node->item);
+    free(node);
+    node = next;
+  }
+}
+
+/* Missile */
+Missile* missile_init(struct game* game) {
+  Missile* missile = malloc(sizeof(struct missile));
+  missile->location.x = rand() % game->width;
+  missile->location.y = game->height - 1;
+  missile->active = true; //false;
+  missile->game = game;
+  missile->dead = false;
+
+  return missile;
+}
+
+void missile_go(Missile* missile) {
+  if (missile->location.y > 0) {
+    missile->location.y -= 1;
+  } else {
+    // Dead means the memory can be freed
+    missile->dead = true;
+  }
+}
+
+void missile_free(Missile* missile) {
+  free(missile);
+}
+
+/* Snake */
 typedef struct snake {
   Node *back, *front;
   struct direction direction;
@@ -348,9 +435,15 @@ bool snake_check_dead(Snake* snake) {
   // Does snake collide with a missile?
   struct node* node = snake->back;
   while (node != NULL) {
-    if (game.missile->location.x == node->point.x && game.missile->location.y == node->point.y) {
-      return true;
+    struct missile_item* missile = game.missiles->head;
+    while (missile != NULL) {
+      if (missile->item->location.x == node->point.x && missile->item->location.y == node->point.y) {
+        return true;
+      }
+
+      missile = missile->next;
     }
+
     node = node->next;
   }
 
@@ -365,31 +458,6 @@ void snake_free(Snake* snake) {
     node_free(to_remove);
   }
   free(snake);
-}
-
-/* Missile */
-Missile* missile_init(struct game* game) {
-  Missile* missile = malloc(sizeof(struct missile));
-  missile->location.x = rand() % game->width;
-  missile->location.y = game->height - 1;
-  missile->active = true; //false;
-  missile->game = game;
-  missile->dead = false;
-
-  return missile;
-}
-
-void missile_go(Missile* missile) {
-  if (missile->location.y > 0) {
-    missile->location.y -= 1;
-  } else {
-    // Dead means the memory can be freed
-    missile->dead = true;
-  }
-}
-
-void missile_free(Missile* missile) {
-  free(missile);
 }
 
 /* Game structure */
@@ -459,11 +527,20 @@ void game_set_time_warp(Game* game) {
 void game_update_missile_stuff(Game* game) {
   // Randomly add new missiles
   // Update all missile locations (and missile_exists hash)
-  // TODO support >1 missile
-  missile_go(game->missile);
-  if (game->missile->dead) {
-    missile_free(game->missile);
-    game->missile = missile_init(game);
+  struct missile_item* missile = game->missiles->head;
+
+  while (missile != NULL) {
+    missile_go(missile->item);
+
+    // Hold reference in case current missile gets freed
+    struct missile_item* next_item = missile->next;
+
+    if (missile->item->dead) {
+      missile_list_remove(game->missiles, missile);
+      //missile_list_add(game->missiles, missile_init(game));
+    }
+
+    missile = next_item;
   }
 }
 
@@ -496,6 +573,11 @@ void game_next_state(Game* game) {
 
     if (game_missile_time_ready(game)) {
       game_update_missile_stuff(game);
+
+      // Random chance of adding a new missile
+      if (rand() % 200 < 10) {
+        missile_list_add(game->missiles, missile_init(game));
+      }
     }
 
     if (snake_check_dead(game->snake)) {
@@ -511,7 +593,7 @@ void game_next_state(Game* game) {
       game->frameDelay = SNAKE_DEFAULT_DELAY - (game->snake->berriesEaten / 4);
     }
   } else {
-    printf("Game Over\n");
+    //printf("Game Over\n");
   }
 }
 
@@ -577,7 +659,10 @@ int main () {
   game = GAME_DEFAULT;
   game.snake = mySnake;
   game.berries = hash_init();
-  game.missile = missile_init(&game);
+  game.missiles = missile_list_init();
+  missile_list_add(game.missiles, missile_init(&game));
+  missile_list_add(game.missiles, missile_init(&game));
+  missile_list_add(game.missiles, missile_init(&game));
   game.missile_exists = hash_init();
 
   game_add_random_berry(&game);
@@ -635,9 +720,14 @@ int main () {
     SDL_Rect missileDest;
     missileDest.w = 10;
     missileDest.h = 10;
-    missileDest.x = game.missile->location.x * 10;
-    missileDest.y = game.missile->location.y * 10;
-    SDL_FillRect(screen, &missileDest, 0xffffffff);
+    struct missile_item* missile = game.missiles->head;
+    while (missile != NULL) {
+      missileDest.x = missile->item->location.x * 10;
+      missileDest.y = missile->item->location.y * 10;
+      SDL_FillRect(screen, &missileDest, 0xffffffff);
+
+      missile = missile -> next;
+    }
     //printf("Done.\n");
 
     SDL_UpdateRect(screen, 0,0,0,0);
@@ -647,7 +737,7 @@ int main () {
   SDL_FreeSurface(screen);
   SDL_FreeSurface(square);
   snake_free(mySnake);
-  missile_free(game.missile);
+  missile_list_free(game.missiles);
   hash_free(game.berries);
   hash_free(game.missile_exists);
   SDL_Quit();
