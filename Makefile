@@ -1,4 +1,4 @@
 
 all:
-	gcc snake.c -lSDL -o snake
+	gcc snake.c --std=gnu99 -g -lSDL -o snake
 

@@ -2,10 +2,12 @@
 #include <stdbool.h>
 #include <time.h>
 #include <stdlib.h>
+#include <string.h>
 #include <assert.h>
 #include <malloc.h>
 #include <stdio.h>
 #include <SDL/SDL.h>
+#include <wordexp.h>
 
 #define DEBUG 1
 
@@ -13,6 +15,124 @@
   if (DEBUG) { \
     fprintf(stderr, args); \
   }
+
+/* High Scores */
+#define HIGH_SCORE_FILE "~/.snake/scores.txt"
+typedef struct score {
+  char* name;
+  int points;
+} score;
+
+typedef struct high_scores {
+  score* scores[10];
+} high_scores;
+
+char* expand_path(char* path) {
+  wordexp_t wordexp_data;
+  // Does shell expansion
+  wordexp(path, &wordexp_data, 0);
+  char* filepath = strdup(wordexp_data.we_wordv[0]);
+  printf("Path: %s\n", filepath);
+  wordfree(&wordexp_data);
+  return filepath;
+}
+
+high_scores* high_scores_load() {
+  high_scores* scores = malloc(sizeof(high_scores));
+  for (int x = 0; x < 10; x++) {
+    scores->scores[x] = NULL;
+  }
+
+  char* filepath = expand_path(HIGH_SCORE_FILE);
+  FILE* fp = fopen(filepath, "r");
+  free(filepath);
+  if (fp == NULL) {
+    printf("Failed to read high scores file\n");
+    return scores;
+  }
+  size_t len = 0;
+  char* line = NULL;
+  int i = 0;
+  while (getline(&line, &len, fp) >= 0) {
+    printf("Line: %s", line);
+    if (strlen(line) <= 1) {
+      break;
+    }
+    char* name = strdup(strtok(line, ","));
+    char* points = strtok(NULL, ",");
+    // Replace trailing newline
+    points[strlen(points) - 1] = '\0';
+    int pts = atoi(points);
+    scores->scores[i] = malloc(sizeof(struct score));
+    scores->scores[i]->name = name;
+    scores->scores[i]->points = pts;
+    printf("%s %d\n", name, pts);
+    
+    i++;
+  }
+
+  fclose(fp);
+  return scores;
+}
+
+/**
+ * Returns -1 if score is not in top 10, otherwise returns 0-based index of score
+ */
+int high_scores_get_score_index(high_scores* scores, int value) {
+  for (int i = 0; i < 10; i++) {
+    if (scores->scores[i] == NULL) {
+      return i;
+    }
+    if (value >= scores->scores[i]->points) {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
+void high_scores_add_score(high_scores* scores, int value, char* name, int index) {
+  // Move all entries (>= index) forward one position to make room for new entry
+  if (scores->scores[9] != NULL) {
+    printf("freeing entry 9\n");
+    free(scores->scores[9]);
+    scores->scores[9] = NULL;
+  }
+  for (int i = 8; i >= index; i--) {
+    printf("moving score %d\n", i);
+    scores->scores[i+1] = scores->scores[i];
+  }
+
+  score* new_entry = malloc(sizeof(score));
+  new_entry->name = name;
+  new_entry->points = value;
+  scores->scores[index] = new_entry;
+}
+
+void high_scores_save(high_scores* scores) {
+  char* path = expand_path(HIGH_SCORE_FILE);
+  FILE* fp = fopen(path, "w");
+  free(path);
+  if (fp == NULL) {
+    printf("Error opening high scores file for writing; exiting");
+    exit(1);
+    return;
+  }
+
+  for (int i = 0; i < 10 && scores->scores[i] != NULL; i++) {
+    // format is name,score
+    fprintf(fp, "%s,%d\n", scores->scores[i]->name, scores->scores[i]->points);
+  }
+
+  fclose(fp);
+}
+
+void high_scores_free(high_scores* scores) {
+  for (int i = 0; i < 10 && scores->scores[i] != NULL; i++) {
+    free(scores->scores[i]->name);
+    free(scores->scores[i]);
+  }
+}
 
 /* Quick & Dirty hash implementation */
 struct hashnode {
@@ -175,6 +295,7 @@ typedef struct game {
   // Missiles - Only one currently supported
   struct missile_list* missiles;
   struct hash* missile_exists;
+  struct high_scores* scores;
 } Game;
 const Game GAME_DEFAULT = {true, false, 50, 50, NULL, NULL, false, NULL, SNAKE_DEFAULT_DELAY, NULL, 0};
 Game game;
@@ -335,6 +456,7 @@ Snake* snake_init() {
   Node* n5 = node_create(8,1, n4);
   mySnake->back = node_create(8, 0, n5);
 
+  mySnake->berriesEaten = 0;
   mySnake->num_points = 7;
   mySnake->has_moved = true;
 
@@ -354,7 +476,7 @@ void snake_print_points(Snake* snake) {
 bool snake_change_direction(Snake* snake, int dx, int dy) {
   // Prevent multiple keypresses before snake has actually moved
   if (!snake->has_moved) {
-     return;
+     return false;
   }
 
   // No direction change. This check also prevents snake from turning back on itself.
@@ -593,6 +715,19 @@ void game_next_state(Game* game) {
       game->frameDelay = SNAKE_DEFAULT_DELAY - (game->snake->berriesEaten / 4);
     }
   } else {
+    // TODO handle highscores somewhere else
+    static bool processed = false;
+    if (!processed) {
+      processed = true;
+      int score_index;
+      if ((score_index = high_scores_get_score_index(game->scores, game->snake->berriesEaten)) >= 0) {
+        printf("New high score! %d\n", game->snake->berriesEaten);
+        high_scores_add_score(game->scores, game->snake->berriesEaten, strdup("MIKE"), score_index);
+        high_scores_save(game->scores);
+      }
+    }
+
+
     //printf("Game Over\n");
   }
 }
@@ -619,6 +754,10 @@ Uint32 timer_event(Uint32 interval, void *param) {
 int main () {
   debug("Hello\n");
   srand(time(NULL));
+
+  high_scores* scores = high_scores_load();
+  printf("%s %d\n", scores->scores[0]->name, scores->scores[0]->points);
+  printf("%s %d\n", scores->scores[1]->name, scores->scores[1]->points);
 
   SDL_Surface* screen;
   SDL_Surface* square;
@@ -660,6 +799,7 @@ int main () {
   game.snake = mySnake;
   game.berries = hash_init();
   game.missiles = missile_list_init();
+  game.scores = scores;
   missile_list_add(game.missiles, missile_init(&game));
   missile_list_add(game.missiles, missile_init(&game));
   missile_list_add(game.missiles, missile_init(&game));
@@ -740,6 +880,7 @@ int main () {
   missile_list_free(game.missiles);
   hash_free(game.berries);
   hash_free(game.missile_exists);
+  high_scores_free(scores);
   SDL_Quit();
 
   return 0;
