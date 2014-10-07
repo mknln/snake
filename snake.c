@@ -7,7 +7,10 @@
 #include <malloc.h>
 #include <stdio.h>
 #include <SDL/SDL.h>
+#include <SDL/SDL_ttf.h>
 #include <wordexp.h>
+
+#include "high-score-entry.h"
 
 #define DEBUG 1
 
@@ -719,12 +722,6 @@ void game_next_state(Game* game) {
     static bool processed = false;
     if (!processed) {
       processed = true;
-      int score_index;
-      if ((score_index = high_scores_get_score_index(game->scores, game->snake->berriesEaten)) >= 0) {
-        printf("New high score! %d\n", game->snake->berriesEaten);
-        high_scores_add_score(game->scores, game->snake->berriesEaten, strdup("MIKE"), score_index);
-        high_scores_save(game->scores);
-      }
     }
 
 
@@ -751,14 +748,26 @@ Uint32 timer_event(Uint32 interval, void *param) {
   return 10;
 }
 
+typedef enum {
+  GAME_RUNNING,
+  GAME_PAUSED,
+  GAME_GAMEOVER,
+  GAME_SCORES
+} GameState;
+
+typedef enum {
+  GAME_SCORE_ENTRY,
+  GAME_SCORE_DISPLAY
+} GameScoreState;
+
 int main () {
   debug("Hello\n");
   srand(time(NULL));
 
   high_scores* scores = high_scores_load();
-  printf("%s %d\n", scores->scores[0]->name, scores->scores[0]->points);
-  printf("%s %d\n", scores->scores[1]->name, scores->scores[1]->points);
+  high_score_entry* score_entry = high_score_entry_init();
 
+  TTF_Init();
   SDL_Surface* screen;
   SDL_Surface* square;
   if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) {
@@ -795,6 +804,8 @@ int main () {
   Snake* mySnake = snake_init();
   snake_print_points(mySnake);
 
+  GameState game_state = GAME_RUNNING;
+  GameScoreState game_score_state = GAME_SCORE_ENTRY;
   game = GAME_DEFAULT;
   game.snake = mySnake;
   game.berries = hash_init();
@@ -820,55 +831,77 @@ int main () {
           break;
         case SDL_KEYDOWN:
           printf("Key event: %d %d\n", event.key.keysym.sym);
-          game_handle_keyevent(&game, event.key);
+          if (game_state == GAME_RUNNING) {
+            game_handle_keyevent(&game, event.key);
+          } else if (game_state == GAME_SCORES) {
+            high_score_entry_handle_keyevent(score_entry, event.key);
+          }
           break;
         case SDL_USEREVENT:
           game_next_state(&game);
           break;
       }
     }
+    
+    // Transition to game over state
+    if (game_state == GAME_RUNNING && game.gameOver) {
+      int score_index;
+      if ((score_index = high_scores_get_score_index(game.scores, game.snake->berriesEaten)) >= 0) {
+        printf("New high score! %d\n", game.snake->berriesEaten);
+        high_scores_add_score(game.scores, game.snake->berriesEaten, strdup("MIKE"), score_index);
+        high_scores_save(game.scores);
+        game_state = GAME_SCORES;
+      } else {
+        game_state = GAME_GAMEOVER;
+      }
+    }
     // repaint
     SDL_FillRect(screen, NULL, 0x00000000);
-    // Paint snake
-    SDL_Rect dest;
-    dest.w = 10;
-    dest.h = 10;
-    Node* node = mySnake->back;
-    while (node != NULL) {
-      dest.x = node->point.x * 10;
-      dest.y = node->point.y * 10;
-      //printf("Blitting %d,%d\n", dest.x, dest.y);
-      SDL_BlitSurface(square, NULL, screen, &dest);
-      node = node->next;
-    }
 
-    // Paint berries
-    dest.w = 10;
-    dest.h = 10;
-    struct hashnode* berries = game.berries->keys;
-    while (berries != NULL) {
-      const char* key = berries->key;
-      int x, y;
-      sscanf(key, "%d,%d", &x, &y);
-      dest.x = x * 10;
-      dest.y = y * 10;
-      SDL_FillRect(screen, &dest, 0xff0000ff);
-      berries = berries->next;
-    }
+    if (game_state == GAME_RUNNING) {
+      // Paint snake
+      SDL_Rect dest;
+      dest.w = 10;
+      dest.h = 10;
+      Node* node = mySnake->back;
+      while (node != NULL) {
+        dest.x = node->point.x * 10;
+        dest.y = node->point.y * 10;
+        //printf("Blitting %d,%d\n", dest.x, dest.y);
+        SDL_BlitSurface(square, NULL, screen, &dest);
+        node = node->next;
+      }
 
-    // Paint missile(s)
-    SDL_Rect missileDest;
-    missileDest.w = 10;
-    missileDest.h = 10;
-    struct missile_item* missile = game.missiles->head;
-    while (missile != NULL) {
-      missileDest.x = missile->item->location.x * 10;
-      missileDest.y = missile->item->location.y * 10;
-      SDL_FillRect(screen, &missileDest, 0xffffffff);
+      // Paint berries
+      dest.w = 10;
+      dest.h = 10;
+      struct hashnode* berries = game.berries->keys;
+      while (berries != NULL) {
+        const char* key = berries->key;
+        int x, y;
+        sscanf(key, "%d,%d", &x, &y);
+        dest.x = x * 10;
+        dest.y = y * 10;
+        SDL_FillRect(screen, &dest, 0xff0000ff);
+        berries = berries->next;
+      }
 
-      missile = missile -> next;
+      // Paint missile(s)
+      SDL_Rect missileDest;
+      missileDest.w = 10;
+      missileDest.h = 10;
+      struct missile_item* missile = game.missiles->head;
+      while (missile != NULL) {
+        missileDest.x = missile->item->location.x * 10;
+        missileDest.y = missile->item->location.y * 10;
+        SDL_FillRect(screen, &missileDest, 0xffffffff);
+
+        missile = missile -> next;
+      }
+      //printf("Done.\n");
+    } else if (game_state == GAME_SCORES) {
+      high_score_entry_draw(score_entry, screen);
     }
-    //printf("Done.\n");
 
     SDL_UpdateRect(screen, 0,0,0,0);
 
@@ -881,6 +914,8 @@ int main () {
   hash_free(game.berries);
   hash_free(game.missile_exists);
   high_scores_free(scores);
+  high_score_entry_free(score_entry);
+  TTF_Quit();
   SDL_Quit();
 
   return 0;
