@@ -2,23 +2,25 @@
 #include "high-score-entry.h"
 #include <SDL/SDL.h>
 #include <SDL/SDL_ttf.h>
+#include <stdio.h>
 
 #define FONT_PATH "/usr/share/fonts/truetype/ttf-dejavu/DejaVuSansMono.ttf"
 
-struct high_score_entry {
-  char name[3];
-  int index;
-  int char1, char2, char3;
-};
+void _high_score_entry_finished_callback(high_score_entry*, void*);
 
 high_score_entry* high_score_entry_init() {
   high_score_entry* entry = malloc(sizeof(struct high_score_entry));
-  strcpy(entry->name, "AAA");
+  strcpy(entry->name, "AAA\0");
   entry->index = 0;
   entry->char1 = 0;
   entry->char2 = 0;
   entry->char3 = 0;
+  entry->finished_callback = &_high_score_entry_finished_callback;
   return entry;
+}
+
+void _high_score_entry_finished_callback(high_score_entry* entry, void* data) {
+  printf("No high score callback implemented!\n");
 }
 
 void high_score_entry_draw(high_score_entry* entry, SDL_Surface* screen) {
@@ -104,5 +106,14 @@ void high_score_entry_handle_keyevent(high_score_entry* entry, SDL_KeyboardEvent
     case SDLK_UP:
       _high_score_entry_next_char(entry);
       break;
+    case SDLK_RETURN:
+    case SDLK_KP_ENTER:
+      entry->finished_callback(entry, entry->callback_data);
+      break;
   }
+}
+
+void high_score_entry_register_callback(high_score_entry* entry, void (*func)(high_score_entry*,void*), void* data) {
+  entry->finished_callback = func;
+  entry->callback_data = data;
 }

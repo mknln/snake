@@ -752,13 +752,47 @@ typedef enum {
   GAME_RUNNING,
   GAME_PAUSED,
   GAME_GAMEOVER,
-  GAME_SCORES
+  GAME_SCORES,
+  GAME_SCORES_DISPLAY
 } GameState;
 
 typedef enum {
   GAME_SCORE_ENTRY,
   GAME_SCORE_DISPLAY
 } GameScoreState;
+
+GameState game_state;
+
+void high_score_entered_callback(high_score_entry* entry, void* data) {
+  Game* game = (Game*)data;
+  printf("entered!!! %s\n", entry->name);
+  int score_index = high_scores_get_score_index(game->scores, game->snake->berriesEaten);
+  high_scores_add_score(game->scores, game->snake->berriesEaten, strdup(entry->name), score_index);
+  high_scores_save(game->scores);
+
+  game_state = GAME_SCORES_DISPLAY;
+}
+
+#define FONT_PATH "/usr/share/fonts/truetype/ttf-dejavu/DejaVuSansMono.ttf"
+void high_scores_paint(high_scores* scores, SDL_Surface* screen) {
+  TTF_Font* font = TTF_OpenFont(FONT_PATH, 25);
+  SDL_Color fg = {255, 255, 255};
+  SDL_Color bg = {0, 0, 0};
+
+  int offsetY = 20;
+  for (int i = 0; i < 10 && scores->scores[i] != NULL; i++) {
+    char* str = malloc(sizeof(char) * 100);
+    sprintf(str, "%d. %s  %d", (i+1), scores->scores[i]->name, scores->scores[i]->points);
+    SDL_Surface* text = TTF_RenderText_Shaded(font, str, fg, bg);
+    SDL_Rect textLocation = {50, offsetY, 0, 0};
+    SDL_BlitSurface(text, NULL, screen, &textLocation);
+    offsetY += text->h;
+    SDL_FreeSurface(text);
+    free(str);
+  }
+
+  TTF_CloseFont(font);
+}
 
 int main () {
   debug("Hello\n");
@@ -804,7 +838,7 @@ int main () {
   Snake* mySnake = snake_init();
   snake_print_points(mySnake);
 
-  GameState game_state = GAME_RUNNING;
+  game_state = GAME_RUNNING;
   GameScoreState game_score_state = GAME_SCORE_ENTRY;
   game = GAME_DEFAULT;
   game.snake = mySnake;
@@ -815,6 +849,8 @@ int main () {
   missile_list_add(game.missiles, missile_init(&game));
   missile_list_add(game.missiles, missile_init(&game));
   game.missile_exists = hash_init();
+
+  high_score_entry_register_callback(score_entry, &high_score_entered_callback, &game);
 
   game_add_random_berry(&game);
 
@@ -848,11 +884,9 @@ int main () {
       int score_index;
       if ((score_index = high_scores_get_score_index(game.scores, game.snake->berriesEaten)) >= 0) {
         printf("New high score! %d\n", game.snake->berriesEaten);
-        high_scores_add_score(game.scores, game.snake->berriesEaten, strdup("MIKE"), score_index);
-        high_scores_save(game.scores);
         game_state = GAME_SCORES;
       } else {
-        game_state = GAME_GAMEOVER;
+        game_state = GAME_SCORES_DISPLAY;
       }
     }
     // repaint
@@ -901,6 +935,8 @@ int main () {
       //printf("Done.\n");
     } else if (game_state == GAME_SCORES) {
       high_score_entry_draw(score_entry, screen);
+    } else if (game_state == GAME_SCORES_DISPLAY) {
+      high_scores_paint(scores, screen);
     }
 
     SDL_UpdateRect(screen, 0,0,0,0);
