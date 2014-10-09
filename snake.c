@@ -98,6 +98,7 @@ void high_scores_add_score(high_scores* scores, int value, char* name, int index
   // Move all entries (>= index) forward one position to make room for new entry
   if (scores->scores[9] != NULL) {
     printf("freeing entry 9\n");
+    free(scores->scores[9]->name);
     free(scores->scores[9]);
     scores->scores[9] = NULL;
   }
