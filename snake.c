@@ -767,8 +767,9 @@ GameState game_state;
 void high_score_entered_callback(high_score_entry* entry, void* data) {
   Game* game = (Game*)data;
   printf("entered!!! %s\n", entry->name);
-  int score_index = high_scores_get_score_index(game->scores, game->snake->berriesEaten);
-  high_scores_add_score(game->scores, game->snake->berriesEaten, strdup(entry->name), score_index);
+  int score = game->snake->berriesEaten * 10;
+  int score_index = high_scores_get_score_index(game->scores, score);
+  high_scores_add_score(game->scores, score, strdup(entry->name), score_index);
   high_scores_save(game->scores);
 
   game_state = GAME_SCORES_DISPLAY;
@@ -777,15 +778,22 @@ void high_score_entered_callback(high_score_entry* entry, void* data) {
 #define FONT_PATH "/usr/share/fonts/truetype/ttf-dejavu/DejaVuSansMono.ttf"
 void high_scores_paint(high_scores* scores, SDL_Surface* screen) {
   TTF_Font* font = TTF_OpenFont(FONT_PATH, 25);
-  SDL_Color fg = {255, 255, 255};
+
+  SDL_Color fg = {255, 0, 0};
   SDL_Color bg = {0, 0, 0};
 
-  int offsetY = 20;
+  // Header
+  SDL_Rect loc = {50, 20, 0, 0};
+  SDL_Surface* header = TTF_RenderText_Shaded(font, "HIGH SCORES TABLE", fg, bg);
+  SDL_BlitSurface(header, NULL, screen, &loc);
+  fg = (SDL_Color){255,255,255};
+
+  int offsetY = 40 + header->h;
   for (int i = 0; i < 10 && scores->scores[i] != NULL; i++) {
     char* str = malloc(sizeof(char) * 100);
-    sprintf(str, "%d. %s  %d", (i+1), scores->scores[i]->name, scores->scores[i]->points);
+    sprintf(str, "%4d %3s %d", (i+1), scores->scores[i]->name, scores->scores[i]->points);
     SDL_Surface* text = TTF_RenderText_Shaded(font, str, fg, bg);
-    SDL_Rect textLocation = {50, offsetY, 0, 0};
+    SDL_Rect textLocation = {30, offsetY, 0, 0};
     SDL_BlitSurface(text, NULL, screen, &textLocation);
     offsetY += text->h;
     SDL_FreeSurface(text);
@@ -883,8 +891,9 @@ int main () {
     // Transition to game over state
     if (game_state == GAME_RUNNING && game.gameOver) {
       int score_index;
-      if ((score_index = high_scores_get_score_index(game.scores, game.snake->berriesEaten)) >= 0) {
-        printf("New high score! %d\n", game.snake->berriesEaten);
+      int score = 10 * game.snake->berriesEaten;
+      if ((score_index = high_scores_get_score_index(game.scores, score)) >= 0) {
+        printf("New high score! %d\n", score);
         game_state = GAME_SCORES;
       } else {
         game_state = GAME_SCORES_DISPLAY;

@@ -2,11 +2,26 @@
 #include "high-score-entry.h"
 #include <SDL/SDL.h>
 #include <SDL/SDL_ttf.h>
+#include <SDL/SDL_gfxPrimitives.h>
 #include <stdio.h>
 
 #define FONT_PATH "/usr/share/fonts/truetype/ttf-dejavu/DejaVuSansMono.ttf"
 
 void _high_score_entry_finished_callback(high_score_entry*, void*);
+
+void _high_score_entry_draw_border(high_score_entry* entry, SDL_Surface* screen) {
+  int thickness = 5;
+  int radius = 2;
+  int i;
+  for (i = 0; i < screen->w; i += screen->w/10 + 10) {
+    roundedBoxRGBA(screen, i,0, i+40, thickness, radius,0, 215, 255, 255);
+    roundedBoxRGBA(screen, i,screen->h - thickness, i+40, screen->h, radius, 0, 215, 255, 255);
+  }
+  for (i = 0; i < screen->h; i += screen->h/10 + thickness) {
+    roundedBoxRGBA(screen, 0,i, thickness,i+40, radius, 0,215,255,255);
+    roundedBoxRGBA(screen, screen->w - thickness,i, screen->w,i+40, radius, 0,215,255,255);
+  }
+}
 
 high_score_entry* high_score_entry_init() {
   high_score_entry* entry = malloc(sizeof(struct high_score_entry));
@@ -24,6 +39,10 @@ void _high_score_entry_finished_callback(high_score_entry* entry, void* data) {
 }
 
 void high_score_entry_draw(high_score_entry* entry, SDL_Surface* screen) {
+
+  // Draw a gold border
+  _high_score_entry_draw_border(entry, screen);
+
   TTF_Font* font = TTF_OpenFont(FONT_PATH, 50);
   SDL_Color fg = {255, 255, 255};
   SDL_Color bg = {0, 0, 0};
