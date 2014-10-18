@@ -16,6 +16,7 @@ high_score_entry* high_score_entry_init();
 
 void high_score_entry_draw(high_score_entry*, SDL_Surface*);
 void high_score_entry_free(high_score_entry*);
+void high_score_entry_reset(high_score_entry*);
 void high_score_entry_handle_keyevent(high_score_entry*,SDL_KeyboardEvent);
 void high_score_entry_register_callback(high_score_entry*, void(*func)(high_score_entry*,void*), void* data);
 

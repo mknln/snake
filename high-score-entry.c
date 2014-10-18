@@ -34,6 +34,14 @@ high_score_entry* high_score_entry_init() {
   return entry;
 }
 
+void high_score_entry_reset(high_score_entry* entry) {
+  strcpy(entry->name, "AAA\0");
+  entry->index = 0;
+  entry->char1 = 0;
+  entry->char2 = 0;
+  entry->char3 = 0;
+}
+
 void _high_score_entry_finished_callback(high_score_entry* entry, void* data) {
   printf("No high score callback implemented!\n");
 }

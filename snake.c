@@ -276,9 +276,16 @@ void hash_free(struct hash* hash) {
   int i;
   for (i = 0; i < hash->hash_size; i++) {
     hashnode_free(hash->hash_array[i]);
+    hash->hash_array[i] = NULL;
   }
   hashnode_free(hash->keys);
+  hash->keys = NULL;
 }
+
+void hash_reset(struct hash* hash) {
+  hash_free(hash);
+}
+
 
 struct missile;
 
@@ -303,6 +310,15 @@ typedef struct game {
 } Game;
 const Game GAME_DEFAULT = {true, false, 50, 50, NULL, NULL, false, NULL, SNAKE_DEFAULT_DELAY, NULL, 0};
 Game game;
+
+void game_reset(Game* game) {
+  game->gameOver = false;
+  game->running = false;
+  game->warpTimerId = NULL;
+  game->timeWarp = false;
+  // berries
+  // missiles
+}
 
 struct point {
   int x;
@@ -365,6 +381,18 @@ MissileList* missile_list_init() {
   MissileList* list = malloc(sizeof(struct missile_list));
   list->head = NULL;
   return list;
+}
+
+void missile_list_reset(MissileList* list) {
+  // free items, reset pointer. Do not free list itself.
+  MissileItem* node = list->head;
+  while (node != NULL) {
+    MissileItem* next = node->next;
+    missile_free(node->item);
+    free(node);
+    node = next;
+  }
+  list->head = NULL;
 }
 
 void missile_list_add(MissileList* list, Missile* missile) {
@@ -465,6 +493,33 @@ Snake* snake_init() {
   mySnake->has_moved = true;
 
   return mySnake;
+}
+
+void snake_reset(Snake* snake) {
+
+  // Set initial direction
+  snake->direction.dx = 0;
+  snake->direction.dy = 1;
+
+  if (snake->back != NULL) {
+    Node* node = snake->back;
+    while (node != NULL) {
+      Node* to_remove = node;
+      node = node->next;
+      node_free(to_remove);
+    }
+  }
+  // Add initial points
+  snake->front = node_create(8,6, NULL);
+  Node* n = node_create(8,5, snake->front);
+  Node* n2 = node_create(8,4, n);
+  Node* n3 = node_create(8,3, n2);
+  Node* n4 = node_create(8,2, n3);
+  Node* n5 = node_create(8,1, n4);
+  snake->back = node_create(8, 0, n5);
+  snake->berriesEaten = 0;
+  snake->num_points = 7;
+  snake->has_moved = true;
 }
 
 void snake_print_points(Snake* snake) {
@@ -880,6 +935,19 @@ int main () {
             game_handle_keyevent(&game, event.key);
           } else if (game_state == GAME_SCORES) {
             high_score_entry_handle_keyevent(score_entry, event.key);
+          } else if (game_state == GAME_SCORES_DISPLAY) {
+            /* Reset everything */
+            game_reset(&game);
+            snake_reset(mySnake);
+            game_state = GAME_RUNNING;
+            game_score_state = GAME_SCORE_ENTRY;
+            hash_reset(game.berries);
+            missile_list_reset(game.missiles);
+            game_add_random_berry(&game);
+            high_score_entry_reset(score_entry);
+
+            game.running = true;
+            /* End reset */
           }
           break;
         case SDL_USEREVENT:
@@ -942,6 +1010,20 @@ int main () {
 
         missile = missile -> next;
       }
+
+      // Draw score text
+      TTF_Font* font = TTF_OpenFont(FONT_PATH, 16);
+      SDL_Color fg = {255, 255, 255};
+      SDL_Color bg = {0, 0, 0};
+      char* scoreText = malloc(sizeof(char) * 20);
+      sprintf(scoreText, "Score: %d", 10 * mySnake->berriesEaten);
+      SDL_Surface* text = TTF_RenderText_Shaded(font, scoreText, fg, bg);
+      SDL_Rect loc = {game.width * 10 - text->w - 10, game.height * 10 - text->h - 10, 0, 0};
+      SDL_BlitSurface(text, NULL, screen, &loc);
+      free(scoreText);
+      SDL_FreeSurface(text);
+      TTF_CloseFont(font);
+
       //printf("Done.\n");
     } else if (game_state == GAME_SCORES) {
       high_score_entry_draw(score_entry, screen);
