@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <SDL/SDL.h>
 #include <SDL/SDL_ttf.h>
+#include <SDL/SDL_image.h>
 #include <wordexp.h>
 
 #include "high-score-entry.h"
@@ -868,6 +869,7 @@ int main () {
   TTF_Init();
   SDL_Surface* screen;
   SDL_Surface* square;
+  SDL_Surface* berry_image = IMG_Load("./berry.png");
   if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) {
     printf("Unable to init SDL: %s\n", SDL_GetError());
     return 1;
@@ -994,7 +996,7 @@ int main () {
         sscanf(key, "%d,%d", &x, &y);
         dest.x = x * 10;
         dest.y = y * 10;
-        SDL_FillRect(screen, &dest, 0xff0000ff);
+        SDL_BlitSurface(berry_image, NULL, screen, &dest);
         berries = berries->next;
       }
 
@@ -1037,6 +1039,7 @@ int main () {
 
   SDL_FreeSurface(screen);
   SDL_FreeSurface(square);
+  SDL_FreeSurface(berry_image);
   snake_free(mySnake);
   missile_list_free(game.missiles);
   hash_free(game.berries);
