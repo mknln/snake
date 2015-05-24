@@ -142,6 +142,7 @@ void high_scores_free(high_scores* scores) {
 /* Quick & Dirty hash implementation */
 struct hashnode {
   char* key;
+  void* data;
   struct hashnode* next;
 };
 
@@ -215,21 +216,22 @@ struct hashnode* hash_keys(struct hash* hash) {
   return hash->keys;
 }
 
-bool hash_exists(struct hash* hash, const char* key) {
+void* hash_at(struct hash* hash, const char* key) {
   struct hashnode* match = hash->hash_array[_hash_func(key) % hash->hash_size];
   while (match != NULL) {
     if (strcmp(match->key, key) == 0) {
-      return true;
+      return match->data;
     }
     match = match->next;
   }
-  return false;
+  return NULL;
 }
 
-void hash_add(struct hash* hash, char* key) {
+void hash_add(struct hash* hash, char* key, void* data) {
   int hash_index =_hash_func(key) % hash->hash_size;
   struct hashnode* new_hashnode = hashnode_init();
   new_hashnode->key = key;
+  new_hashnode->data = data;
   if (hash->hash_array[hash_index] == NULL) {
     new_hashnode->next = NULL;
     hash->hash_array[hash_index] = new_hashnode;
@@ -240,6 +242,7 @@ void hash_add(struct hash* hash, char* key) {
   }
 
   // Add key to front of list of keys
+  // We are abusing hashnode for this purpose ...
   struct hashnode* keyhash = hashnode_init();
   keyhash->key = strdup(key);
   keyhash->next = hash->keys;
@@ -289,11 +292,14 @@ void hash_reset(struct hash* hash) {
 
 
 struct missile;
+struct berry;
 
 /* Game - Declarations */
 #define SNAKE_DEFAULT_DELAY 80
 #define SNAKE_WARPED_DELAY 30
+#define SNAKE_HYPER_DELAY 30
 #define MISSILE_DELAY 80
+#define GAME_HYPER_MODE_DURATION_MS 10000
 typedef struct game {
   bool running;
   bool gameOver;
@@ -303,13 +309,15 @@ typedef struct game {
   struct hash* berries;
   bool timeWarp;
   SDL_TimerID warpTimerId;
+  bool hyperMode;
+  SDL_TimerID hyperTimerId;
   int frameDelay;
   // Missiles - Only one currently supported
   struct missile_list* missiles;
   struct hash* missile_exists;
   struct high_scores* scores;
 } Game;
-const Game GAME_DEFAULT = {true, false, 50, 50, NULL, NULL, false, NULL, SNAKE_DEFAULT_DELAY, NULL, 0};
+const Game GAME_DEFAULT = {true, false, 50, 50, NULL, NULL, false, NULL, false, NULL, SNAKE_DEFAULT_DELAY, NULL, 0};
 Game game;
 
 void game_reset(Game* game) {
@@ -317,6 +325,7 @@ void game_reset(Game* game) {
   game->running = false;
   game->warpTimerId = NULL;
   game->timeWarp = false;
+  game->hyperMode = false;
   // berries
   // missiles
 }
@@ -325,6 +334,23 @@ struct point {
   int x;
   int y;
 };
+
+typedef struct berry {
+  bool hyper;
+  bool added_during_hyper;
+} Berry;
+
+Berry* berry_init() {
+  Berry* berry = malloc(sizeof(Berry));
+  berry->hyper = false;
+  berry->added_during_hyper = false;
+  return berry;
+}
+
+void berry_free(Berry* berry) {
+  free(berry);
+}
+
 typedef struct missile {
   struct point location;
   bool active;
@@ -333,13 +359,15 @@ typedef struct missile {
 } Missile;
 void missile_free(struct missile*);
 
-bool game_has_berry_at(struct game*, int, int);
+Berry* game_berry_at(struct game*, int, int);
 void game_remove_berry(struct game*, int, int);
 void game_add_random_berry(struct game*);
 void game_handle_keyevent(struct game*, SDL_KeyboardEvent);
 void game_next_state(struct game*);
-void game_set_timewarp(struct game*);
+void game_set_time_warp(struct game*);
+void game_enter_hyper_mode(Game* game);
 Uint32 game_disable_timewarp_callback(Uint32, void*);
+Uint32 game_disable_hypermode_callback(Uint32, void*);
 void game_update_missile_stuff(struct game*);
 
 /* Snake structures */
@@ -561,7 +589,11 @@ void snake_grow(Snake* snake) {
 bool snake_try_eat_berry(Snake* snake) {
   int y = snake->front->point.y;
   int x = snake->front->point.x;
-  if (game_has_berry_at(&game, x, y)) {
+  Berry* berry = game_berry_at(&game, x, y);
+  if (berry != NULL) {
+    if (berry->hyper) {
+      game_enter_hyper_mode(&game);
+    }
     game_remove_berry(&game, x, y);
     snake_grow(snake);
     snake->berriesEaten++;
@@ -609,6 +641,12 @@ bool snake_check_dead(Snake* snake) {
   if (snake->front->point.x < 0 || snake->front->point.x >= game.width || snake->front->point.y < 0 || snake->front->point.y >= game.height) {
     return true;
   }
+
+  // In hyper-mode, snake can go out of bounds but otherwise cannot die
+  if (game.hyperMode) {
+    return false;
+  }
+
   // Does snake collide with itself?
   if (snake_has_point_at_ignore_front(snake, snake->front->point.x, snake->front->point.y)) {
     return true;
@@ -669,10 +707,10 @@ void game_handle_keyevent(Game* game, SDL_KeyboardEvent keyevent) {
   }
 }
 
-bool game_has_berry_at(Game* game, int x, int y) {
+Berry* game_berry_at(Game* game, int x, int y) {
   char str[7];
   sprintf(str, "%d,%d", x, y);
-  return hash_exists(game->berries, str);
+  return (Berry*)hash_at(game->berries, str);
 }
 
 void game_add_random_berry(Game* game) {
@@ -684,15 +722,46 @@ void game_add_random_berry(Game* game) {
   } else {
     char* str = malloc(8); // 999,999\0
     sprintf(str, "%d,%d", x, y);
-    hash_add(game->berries, str);
+    Berry* berry = berry_init();
+    // Don't add more hyper berries when already in hyper mode
+    if (game->hyperMode == false) {
+      berry->hyper = true;// (rand() % 10 == 1);
+    }
+    // Mark for cleanup if added during hyper
+    berry->added_during_hyper = game->hyperMode;
+    hash_add(game->berries, str, berry);
     printf("Added berry at %d, %d\n", x, y);
+    printf("Berry hyper? %d\n", berry->hyper);
+  }
+}
+
+void game_cleanup_berries(Game* game) {
+  // Remove berries added during hyper mode
+  struct hashnode* keys = game->berries->keys;
+  while (keys != NULL) {
+    const char* key = keys->key;
+    int x, y;
+    sscanf(key, "%d,%d", &x, &y);
+    Berry* berry = (Berry*)hash_at(game->berries, key);
+    if (berry->added_during_hyper) {
+      game_remove_berry(game, x, y);
+    }
+    keys = keys->next;
+  }
+  // If that is all the berries, add one more.
+  if (game->berries->keys == NULL) {
+    game_add_random_berry(game);
   }
 }
 
 void game_remove_berry(Game* game, int x, int y) {
   char str[7];
   sprintf(str, "%d,%d", x, y);
-  hash_delete(game->berries, str);
+  Berry* berry = (Berry*)hash_at(game->berries, str);
+  if (berry != NULL) {
+    hash_delete(game->berries, str);
+    berry_free(berry);
+  }
 }
 
 Uint32 game_disable_timewarp_callback(Uint32 interval, void *param) {
@@ -714,6 +783,32 @@ void game_set_time_warp(Game* game) {
   game->warpTimerId = SDL_AddTimer(600, game_disable_timewarp_callback, game);
 }
 
+void game_enter_hyper_mode(Game* game) {
+  printf("Entering hyper mode\n");
+  game->hyperMode = true;
+  int berries_to_add = 10;
+  while (berries_to_add > 0) {
+    game_add_random_berry(game);
+    berries_to_add--;
+  }
+
+  // Temporary speed-up
+  if (game->hyperTimerId != NULL) {
+    SDL_RemoveTimer(game->hyperTimerId);
+    game->hyperTimerId = NULL;
+  }
+  game->hyperTimerId = SDL_AddTimer(GAME_HYPER_MODE_DURATION_MS, game_disable_hypermode_callback, game);
+}
+
+Uint32 game_disable_hypermode_callback(Uint32 interval, void *param) {
+
+  printf("Disabling hypermode\n");
+  struct game* game = (struct game*) param;
+  game->hyperMode = false;
+  game->hyperTimerId = NULL;
+  game_cleanup_berries(game);
+  return 0; // One-shot timer
+}
 void game_update_missile_stuff(Game* game) {
   // Randomly add new missiles
   // Update all missile locations (and missile_exists hash)
@@ -737,11 +832,14 @@ void game_update_missile_stuff(Game* game) {
 bool game_snake_time_ready(Game* game) {
     Uint32 time_now = SDL_GetTicks();
     static Uint32 last_snake_time = 0;
-    bool res = (time_now - last_snake_time >= game->frameDelay || (game->timeWarp && (time_now - last_snake_time >= SNAKE_WARPED_DELAY)));
-    if (res) {
+    bool normalReady = time_now - last_snake_time >= game->frameDelay;
+    bool warpReady = game->timeWarp && (time_now - last_snake_time >= SNAKE_WARPED_DELAY);
+    bool hyperReady = game->hyperMode && (time_now - last_snake_time >= SNAKE_HYPER_DELAY);
+    if (normalReady || warpReady || hyperReady) {
       last_snake_time = time_now;
+      return true;
     }
-    return res;
+    return false;
 }
 
 bool game_missile_time_ready(Game* game) {
@@ -776,6 +874,7 @@ void game_next_state(Game* game) {
     }
     if (snake_try_eat_berry(game->snake)) {
       printf("Ate berry\n");
+      
       game_add_random_berry(game);
       // Set time warp for next 1 second
       game_set_time_warp(game);
@@ -872,7 +971,8 @@ void screen_draw_score(SDL_Surface* screen, Game game) {
   TTF_CloseFont(font);
 }
 
-void screen_draw_snake(SDL_Surface* screen, Game game, SDL_Surface* square) {
+void screen_draw_snake(SDL_Surface* screen, Game game, SDL_Surface* square,
+                       SDL_Surface* hyper_square) {
   SDL_Rect dest;
   dest.w = 10;
   dest.h = 10;
@@ -881,24 +981,35 @@ void screen_draw_snake(SDL_Surface* screen, Game game, SDL_Surface* square) {
     dest.x = node->point.x * 10;
     dest.y = node->point.y * 10;
     //printf("Blitting %d,%d\n", dest.x, dest.y);
-    SDL_BlitSurface(square, NULL, screen, &dest);
+    if (game.hyperMode) {
+      SDL_BlitSurface(hyper_square, NULL, screen, &dest);
+    } else {
+      SDL_BlitSurface(square, NULL, screen, &dest);
+    }
     node = node->next;
   }
 }
 
-void screen_draw_berries(SDL_Surface* screen, Game game, SDL_Surface* berry_image) {
+void screen_draw_berries(SDL_Surface* screen, Game game,
+                         SDL_Surface* berry_image,
+                         SDL_Surface* hyper_image) {
   SDL_Rect dest;
   dest.w = 10;
   dest.h = 10;
-  struct hashnode* berries = game.berries->keys;
-  while (berries != NULL) {
-    const char* key = berries->key;
+  struct hashnode* keys = game.berries->keys;
+  while (keys != NULL) {
+    const char* key = keys->key;
     int x, y;
     sscanf(key, "%d,%d", &x, &y);
     dest.x = x * 10;
     dest.y = y * 10;
-    SDL_BlitSurface(berry_image, NULL, screen, &dest);
-    berries = berries->next;
+    Berry* berry = (Berry*)hash_at(game.berries, key);
+    if (berry->hyper) {
+      SDL_BlitSurface(hyper_image, NULL, screen, &dest);
+    } else {
+      SDL_BlitSurface(berry_image, NULL, screen, &dest);
+    }
+    keys = keys->next;
   }
 }
 
@@ -925,8 +1036,9 @@ int main () {
 
   TTF_Init();
   SDL_Surface* screen;
-  SDL_Surface* square;
+  SDL_Surface* green_square, *yellow_square;
   SDL_Surface* berry_image = IMG_Load("./berry.png");
+  SDL_Surface* star_image = IMG_Load("./star.png");
   if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) {
     printf("Unable to init SDL: %s\n", SDL_GetError());
     return 1;
@@ -940,7 +1052,16 @@ int main () {
   }
 
   assert(SDL_BYTEORDER == SDL_LIL_ENDIAN);
-  square = SDL_CreateRGBSurface(SDL_ALPHA_OPAQUE,
+  green_square = SDL_CreateRGBSurface(SDL_ALPHA_OPAQUE,
+      10, /* width */
+      10, /* height */
+      32, /* color depth */
+      0x000000ff, /* rmask */
+      0x0000ff00, /* gmask */
+      0x00ff0000, /* bmask */
+      0xff000000 /* amask */
+    );
+  yellow_square = SDL_CreateRGBSurface(SDL_ALPHA_OPAQUE,
       10, /* width */
       10, /* height */
       32, /* color depth */
@@ -950,13 +1071,14 @@ int main () {
       0xff000000 /* amask */
     );
 
-  if (square == NULL) {
-    printf("Issue creating square RGB surface: %s\n", SDL_GetError());
-    return 1;
-  }
+  assert(green_square != NULL);
+  assert(yellow_square != NULL);
   //SDL_FillRect(square, NULL, 0x4000FF00);
-  Uint32 color = SDL_MapRGBA(square->format, 0, 255, 0, 200);
-  SDL_FillRect(square, NULL, color);
+  //Note: We are doing all these steps to get transparency for the squares
+  Uint32 green = SDL_MapRGBA(green_square->format, 0, 255, 0, 200);
+  SDL_FillRect(green_square, NULL, green);
+  Uint32 yellow = SDL_MapRGBA(yellow_square->format, 255, 255, 0, 200);
+  SDL_FillRect(yellow_square, NULL, yellow);
 
   Snake* mySnake = snake_init();
   snake_print_points(mySnake);
@@ -1034,10 +1156,10 @@ int main () {
       screen_draw_score(screen, game);
 
       // Paint snake
-      screen_draw_snake(screen, game, square);
+      screen_draw_snake(screen, game, green_square, yellow_square);
 
       // Paint berries
-      screen_draw_berries(screen, game, berry_image);
+      screen_draw_berries(screen, game, berry_image, star_image);
 
       // Paint missile(s)
       screen_draw_missiles(screen, game);
@@ -1054,7 +1176,8 @@ int main () {
   }
 
   SDL_FreeSurface(screen);
-  SDL_FreeSurface(square);
+  SDL_FreeSurface(green_square);
+  SDL_FreeSurface(yellow_square);
   SDL_FreeSurface(berry_image);
   snake_free(mySnake);
   missile_list_free(game.missiles);
