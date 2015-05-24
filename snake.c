@@ -15,10 +15,68 @@
 
 #define DEBUG 1
 
-#define debug(args) \
+#define debug(fmt, ...) \
   if (DEBUG) { \
-    fprintf(stderr, args); \
+    fprintf(stderr, fmt, ##__VA_ARGS__); \
   }
+
+/* Timer object */
+/* Added because the SDL timer doesn't support pausing */
+typedef struct mytimer {
+  SDL_TimerID timerId;
+  int startTime;
+  int lastPauseTime;
+  int duration;
+  int timeLeft;
+  // As needed by SDL_AddTimer
+  SDL_NewTimerCallback callback;
+  void* param;
+} MyTimer;
+
+MyTimer* mytimer_init(int duration, SDL_NewTimerCallback callback,
+                      void* param) {
+  MyTimer* mytimer = malloc(sizeof(MyTimer));
+  mytimer->duration = duration;
+  mytimer->callback = callback;
+  mytimer->param = param;
+  mytimer->timeLeft = duration;
+  mytimer->timerId = SDL_AddTimer(duration, callback, param);
+  mytimer->startTime = SDL_GetTicks();
+  mytimer->lastPauseTime = SDL_GetTicks();
+  return mytimer;
+}
+
+void _mytimer_cancel_timer(MyTimer* mytimer) {
+  if (mytimer->timerId != NULL) {
+    SDL_RemoveTimer(mytimer->timerId);
+    mytimer->timerId = NULL;
+  }
+}
+
+void mytimer_pause(MyTimer* mytimer) {
+  int time_elapsed = SDL_GetTicks() - mytimer->lastPauseTime;
+  mytimer->timeLeft = mytimer->timeLeft - time_elapsed;
+  debug("Halting timer with %d left\n", mytimer->timeLeft);
+  _mytimer_cancel_timer(mytimer);
+  mytimer->lastPauseTime = SDL_GetTicks();
+}
+
+void mytimer_unpause(MyTimer* mytimer) {
+  if (mytimer->timerId == NULL) {
+    debug("Resuming timer with %d left\n", mytimer->timeLeft);
+    mytimer->timerId = SDL_AddTimer(mytimer->timeLeft, mytimer->callback, mytimer->param);
+  } else {
+    debug("!! Warning: Attempt to unpause timer that is not paused\n");
+  }
+}
+
+void mytimer_cancel(MyTimer* mytimer) {
+  _mytimer_cancel_timer(mytimer);
+}
+
+void mytimer_free(MyTimer* mytimer) {
+  free(mytimer);
+}
 
 /* High Scores */
 #define HIGH_SCORE_FILE "~/.snake/scores.txt"
@@ -310,22 +368,29 @@ typedef struct game {
   bool timeWarp;
   SDL_TimerID warpTimerId;
   bool hyperMode;
-  SDL_TimerID hyperTimerId;
+  struct mytimer* hyperTimer;
   int frameDelay;
-  // Missiles - Only one currently supported
+  // Missiles
   struct missile_list* missiles;
   struct hash* missile_exists;
   struct high_scores* scores;
 } Game;
-const Game GAME_DEFAULT = {true, false, 50, 50, NULL, NULL, false, NULL, false, NULL, SNAKE_DEFAULT_DELAY, NULL, 0};
+const Game GAME_DEFAULT = {true, false, 50, 50, NULL, NULL, false, NULL, false, NULL, SNAKE_DEFAULT_DELAY, NULL, NULL, NULL};
 Game game;
 
 void game_reset(Game* game) {
-  game->gameOver = false;
   game->running = false;
-  game->warpTimerId = NULL;
+  game->gameOver = false;
   game->timeWarp = false;
+  game->warpTimerId = NULL;
   game->hyperMode = false;
+  if (game->hyperTimer != NULL) {
+    mytimer_cancel(game->hyperTimer);
+    mytimer_free(game->hyperTimer);
+    game->hyperTimer = NULL;
+  }
+  game->frameDelay = SNAKE_DEFAULT_DELAY;
+  game->hyperTimer = NULL;
   // berries
   // missiles
 }
@@ -684,6 +749,15 @@ void snake_free(Snake* snake) {
 /* Game methods */
 void game_pause(Game* game) {
   game->running = !game->running;
+
+  // Manage hypermode timer
+  if (game->hyperMode && game->hyperTimer != NULL) {
+    if (game->running) {
+      mytimer_unpause(game->hyperTimer);
+    } else {
+      mytimer_pause(game->hyperTimer);
+    }
+  }
 }
 
 void game_handle_keyevent(Game* game, SDL_KeyboardEvent keyevent) {
@@ -793,11 +867,12 @@ void game_enter_hyper_mode(Game* game) {
   }
 
   // Temporary speed-up
-  if (game->hyperTimerId != NULL) {
-    SDL_RemoveTimer(game->hyperTimerId);
-    game->hyperTimerId = NULL;
+  if (game->hyperTimer != NULL) {
+    mytimer_cancel(game->hyperTimer);
+    mytimer_free(game->hyperTimer);
+    game->hyperTimer = NULL;
   }
-  game->hyperTimerId = SDL_AddTimer(GAME_HYPER_MODE_DURATION_MS, game_disable_hypermode_callback, game);
+  game->hyperTimer = mytimer_init(GAME_HYPER_MODE_DURATION_MS, game_disable_hypermode_callback, game);
 }
 
 Uint32 game_disable_hypermode_callback(Uint32 interval, void *param) {
@@ -805,7 +880,9 @@ Uint32 game_disable_hypermode_callback(Uint32 interval, void *param) {
   printf("Disabling hypermode\n");
   struct game* game = (struct game*) param;
   game->hyperMode = false;
-  game->hyperTimerId = NULL;
+  mytimer_cancel(game->hyperTimer);
+  mytimer_free(game->hyperTimer);
+  game->hyperTimer = NULL;
   game_cleanup_berries(game);
   return 0; // One-shot timer
 }
