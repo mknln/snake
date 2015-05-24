@@ -20,6 +20,9 @@
     fprintf(stderr, fmt, ##__VA_ARGS__); \
   }
 
+// Suppress -Wunused-parameter warning from gcc
+#define UNUSED(expr) do { (void)(expr); } while (0)
+
 /* Timer object */
 /* Added because the SDL timer doesn't support pausing */
 typedef struct mytimer {
@@ -263,7 +266,7 @@ unsigned long _hash_func(const char* s) {
   unsigned long hash = 5381;
   int c;
   
-  while (c = *s++) {
+  while ((c = *s++)) {
     hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
   }
 
@@ -618,7 +621,6 @@ void snake_reset(Snake* snake) {
 
 void snake_print_points(Snake* snake) {
   printf("Direction: %d, %d\n", snake->direction.dx, snake->direction.dy);
-  int i;
   Node* node = snake->back;
   while (node != NULL) {
     printf("Point: %d, %d\n", node->point.x, node->point.y);
@@ -777,6 +779,8 @@ void game_handle_keyevent(Game* game, SDL_KeyboardEvent keyevent) {
     case SDLK_p:
     case SDLK_SPACE:
       game_pause(game);
+      break;
+    default:
       break;
   }
 }
@@ -1161,7 +1165,6 @@ int main () {
   snake_print_points(mySnake);
 
   game_state = GAME_RUNNING;
-  GameScoreState game_score_state = GAME_SCORE_ENTRY;
   game = GAME_DEFAULT;
   game.snake = mySnake;
   game.berries = hash_init();
@@ -1177,6 +1180,7 @@ int main () {
   game_add_random_berry(&game);
 
   SDL_TimerID timerId = SDL_AddTimer(SNAKE_DEFAULT_DELAY, timer_event, &game);
+  UNUSED(timerId);
 
   // Wait for the user to close the window
   bool run = true;
@@ -1188,7 +1192,7 @@ int main () {
           run = false;
           break;
         case SDL_KEYDOWN:
-          printf("Key event: %d %d\n", event.key.keysym.sym);
+          printf("Key event: %d\n", event.key.keysym.sym);
           if (game_state == GAME_RUNNING) {
             game_handle_keyevent(&game, event.key);
           } else if (game_state == GAME_SCORES) {
@@ -1198,7 +1202,6 @@ int main () {
             game_reset(&game);
             snake_reset(mySnake);
             game_state = GAME_RUNNING;
-            game_score_state = GAME_SCORE_ENTRY;
             hash_reset(game.berries);
             missile_list_reset(game.missiles);
             game_add_random_berry(&game);

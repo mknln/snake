@@ -137,6 +137,8 @@ void high_score_entry_handle_keyevent(high_score_entry* entry, SDL_KeyboardEvent
     case SDLK_KP_ENTER:
       entry->finished_callback(entry, entry->callback_data);
       break;
+    default:
+      break;
   }
 }
 
