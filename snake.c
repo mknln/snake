@@ -803,7 +803,7 @@ void game_add_random_berry(Game* game) {
     Berry* berry = berry_init();
     // Don't add more hyper berries when already in hyper mode
     if (game->hyperMode == false) {
-      berry->hyper = true;// (rand() % 10 == 1);
+      berry->hyper = (rand() % 10 == 1);
     }
     // Mark for cleanup if added during hyper
     berry->added_during_hyper = game->hyperMode;
