@@ -644,6 +644,10 @@ void snake_free(Snake* snake) {
 
 /* Game structure */
 /* Game methods */
+void game_pause(Game* game) {
+  game->running = !game->running;
+}
+
 void game_handle_keyevent(Game* game, SDL_KeyboardEvent keyevent) {
   switch (keyevent.keysym.sym) {
     case SDLK_DOWN:
@@ -657,6 +661,10 @@ void game_handle_keyevent(Game* game, SDL_KeyboardEvent keyevent) {
       break;
     case SDLK_RIGHT:
       snake_change_direction(game->snake, 1, 0);
+      break;
+    case SDLK_p:
+    case SDLK_SPACE:
+      game_pause(game);
       break;
   }
 }
