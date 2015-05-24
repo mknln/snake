@@ -774,15 +774,6 @@ void game_next_state(Game* game) {
       // Decrease delay by 1ms for every 4 berries eaten
       game->frameDelay = SNAKE_DEFAULT_DELAY - (game->snake->berriesEaten / 4);
     }
-  } else {
-    // TODO handle highscores somewhere else
-    static bool processed = false;
-    if (!processed) {
-      processed = true;
-    }
-
-
-    //printf("Game Over\n");
   }
 }
 
@@ -857,6 +848,64 @@ void high_scores_paint(high_scores* scores, SDL_Surface* screen) {
   }
 
   TTF_CloseFont(font);
+}
+
+void screen_draw_score(SDL_Surface* screen, Game game) {
+  TTF_Font* font = TTF_OpenFont(FONT_PATH, 16);
+  SDL_Color fg = {255, 255, 255};
+  SDL_Color bg = {0, 0, 0};
+  char* scoreText = malloc(sizeof(char) * 20);
+  sprintf(scoreText, "Score: %d", 10 * game.snake->berriesEaten);
+  SDL_Surface* text = TTF_RenderText_Shaded(font, scoreText, fg, bg);
+  SDL_Rect loc = {game.width * 10 - text->w - 10, game.height * 10 - text->h - 10, 0, 0};
+  SDL_BlitSurface(text, NULL, screen, &loc);
+  free(scoreText);
+  SDL_FreeSurface(text);
+  TTF_CloseFont(font);
+}
+
+void screen_draw_snake(SDL_Surface* screen, Game game, SDL_Surface* square) {
+  SDL_Rect dest;
+  dest.w = 10;
+  dest.h = 10;
+  Node* node = game.snake->back;
+  while (node != NULL) {
+    dest.x = node->point.x * 10;
+    dest.y = node->point.y * 10;
+    //printf("Blitting %d,%d\n", dest.x, dest.y);
+    SDL_BlitSurface(square, NULL, screen, &dest);
+    node = node->next;
+  }
+}
+
+void screen_draw_berries(SDL_Surface* screen, Game game, SDL_Surface* berry_image) {
+  SDL_Rect dest;
+  dest.w = 10;
+  dest.h = 10;
+  struct hashnode* berries = game.berries->keys;
+  while (berries != NULL) {
+    const char* key = berries->key;
+    int x, y;
+    sscanf(key, "%d,%d", &x, &y);
+    dest.x = x * 10;
+    dest.y = y * 10;
+    SDL_BlitSurface(berry_image, NULL, screen, &dest);
+    berries = berries->next;
+  }
+}
+
+void screen_draw_missiles(SDL_Surface* screen, Game game) {
+  SDL_Rect missileDest;
+  missileDest.w = 10;
+  missileDest.h = 10;
+  struct missile_item* missile = game.missiles->head;
+  while (missile != NULL) {
+    missileDest.x = missile->item->location.x * 10;
+    missileDest.y = missile->item->location.y * 10;
+    SDL_FillRect(screen, &missileDest, 0xffffffff);
+
+    missile = missile -> next;
+  }
 }
 
 int main () {
@@ -952,7 +1001,7 @@ int main () {
             /* End reset */
           }
           break;
-        case SDL_USEREVENT:
+        case SDL_USEREVENT: // Timer event
           game_next_state(&game);
           break;
       }
@@ -973,58 +1022,17 @@ int main () {
     SDL_FillRect(screen, NULL, 0x00000000);
 
     if (game_state == GAME_RUNNING) {
+      // Draw score text
+      screen_draw_score(screen, game);
+
       // Paint snake
-      SDL_Rect dest;
-      dest.w = 10;
-      dest.h = 10;
-      Node* node = mySnake->back;
-      while (node != NULL) {
-        dest.x = node->point.x * 10;
-        dest.y = node->point.y * 10;
-        //printf("Blitting %d,%d\n", dest.x, dest.y);
-        SDL_BlitSurface(square, NULL, screen, &dest);
-        node = node->next;
-      }
+      screen_draw_snake(screen, game, square);
 
       // Paint berries
-      dest.w = 10;
-      dest.h = 10;
-      struct hashnode* berries = game.berries->keys;
-      while (berries != NULL) {
-        const char* key = berries->key;
-        int x, y;
-        sscanf(key, "%d,%d", &x, &y);
-        dest.x = x * 10;
-        dest.y = y * 10;
-        SDL_BlitSurface(berry_image, NULL, screen, &dest);
-        berries = berries->next;
-      }
+      screen_draw_berries(screen, game, berry_image);
 
       // Paint missile(s)
-      SDL_Rect missileDest;
-      missileDest.w = 10;
-      missileDest.h = 10;
-      struct missile_item* missile = game.missiles->head;
-      while (missile != NULL) {
-        missileDest.x = missile->item->location.x * 10;
-        missileDest.y = missile->item->location.y * 10;
-        SDL_FillRect(screen, &missileDest, 0xffffffff);
-
-        missile = missile -> next;
-      }
-
-      // Draw score text
-      TTF_Font* font = TTF_OpenFont(FONT_PATH, 16);
-      SDL_Color fg = {255, 255, 255};
-      SDL_Color bg = {0, 0, 0};
-      char* scoreText = malloc(sizeof(char) * 20);
-      sprintf(scoreText, "Score: %d", 10 * mySnake->berriesEaten);
-      SDL_Surface* text = TTF_RenderText_Shaded(font, scoreText, fg, bg);
-      SDL_Rect loc = {game.width * 10 - text->w - 10, game.height * 10 - text->h - 10, 0, 0};
-      SDL_BlitSurface(text, NULL, screen, &loc);
-      free(scoreText);
-      SDL_FreeSurface(text);
-      TTF_CloseFont(font);
+      screen_draw_missiles(screen, game);
 
       //printf("Done.\n");
     } else if (game_state == GAME_SCORES) {
