@@ -61,12 +61,12 @@ void mytimer_pause(MyTimer* mytimer) {
   mytimer->timeLeft = mytimer->timeLeft - time_elapsed;
   debug("Halting timer with %d left\n", mytimer->timeLeft);
   _mytimer_cancel_timer(mytimer);
-  mytimer->lastPauseTime = SDL_GetTicks();
 }
 
 void mytimer_unpause(MyTimer* mytimer) {
   if (mytimer->timerId == NULL) {
     debug("Resuming timer with %d left\n", mytimer->timeLeft);
+    mytimer->lastPauseTime = SDL_GetTicks();
     mytimer->timerId = SDL_AddTimer(mytimer->timeLeft, mytimer->callback, mytimer->param);
   } else {
     debug("!! Warning: Attempt to unpause timer that is not paused\n");
