@@ -90,6 +90,7 @@ typedef struct score {
 
 typedef struct high_scores {
   score* scores[10];
+  int current_index;
 } high_scores;
 
 char* expand_path(char* path) {
@@ -107,6 +108,7 @@ high_scores* high_scores_load() {
   for (int x = 0; x < 10; x++) {
     scores->scores[x] = NULL;
   }
+  scores->current_index = -1;
 
   char* filepath = expand_path(HIGH_SCORE_FILE);
   FILE* fp = fopen(filepath, "r");
@@ -128,7 +130,7 @@ high_scores* high_scores_load() {
     // Replace trailing newline
     points[strlen(points) - 1] = '\0';
     int pts = atoi(points);
-    scores->scores[i] = malloc(sizeof(struct score));
+    scores->scores[i] = malloc(sizeof(score));
     scores->scores[i]->name = name;
     scores->scores[i]->points = pts;
     printf("%s %d\n", name, pts);
@@ -138,6 +140,13 @@ high_scores* high_scores_load() {
 
   fclose(fp);
   return scores;
+}
+
+/**
+ * Reset high scores structure
+ */
+void high_scores_reset(high_scores* scores) {
+  scores->current_index = -1;
 }
 
 /**
@@ -173,6 +182,7 @@ void high_scores_add_score(high_scores* scores, int value, char* name, int index
   new_entry->name = name;
   new_entry->points = value;
   scores->scores[index] = new_entry;
+  scores->current_index = index;
 }
 
 void high_scores_save(high_scores* scores) {
@@ -1015,6 +1025,7 @@ void high_scores_paint(high_scores* scores, SDL_Surface* screen) {
   TTF_Font* font = TTF_OpenFont(FONT_PATH, 25);
 
   SDL_Color fg = {255, 0, 0};
+  SDL_Color hilite = {255, 255, 0};
   SDL_Color bg = {0, 0, 0};
 
   // Header
@@ -1027,7 +1038,8 @@ void high_scores_paint(high_scores* scores, SDL_Surface* screen) {
   for (int i = 0; i < 10 && scores->scores[i] != NULL; i++) {
     char* str = malloc(sizeof(char) * 100);
     sprintf(str, "%4d %3s %d", (i+1), scores->scores[i]->name, scores->scores[i]->points);
-    SDL_Surface* text = TTF_RenderText_Shaded(font, str, fg, bg);
+    SDL_Color text_color = (i == scores->current_index) ? hilite : fg;
+    SDL_Surface* text = TTF_RenderText_Shaded(font, str, text_color, bg);
     SDL_Rect textLocation = {30, offsetY, 0, 0};
     SDL_BlitSurface(text, NULL, screen, &textLocation);
     offsetY += text->h;
@@ -1206,6 +1218,7 @@ int main () {
             missile_list_reset(game.missiles);
             game_add_random_berry(&game);
             high_score_entry_reset(score_entry);
+            high_scores_reset(scores);
 
             game.running = true;
             /* End reset */
